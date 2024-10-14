@@ -131,64 +131,61 @@ class MediapipeKPDetector(_KPDetector):
                 estimate_jacobian=estimate_jacobian,
                 scale_factor=scale_factor,
                 single_jacobian_map=single_jacobian_map,
-                pad=pad,
-                kp_variance=kp_variance)
+                pad=pad)
         self.mp_face_mesh = mp.solutions.face_mesh
 
-    def forward(self, x, image_path=None):
+    def forward(self, x):
         """
         Overrides the KPDetector forward function.
-        Accepts an image path, processes it with Mediapipe, and returns the Jacobians and keypoints for detected keypoints.
+        Accepts a tensor 'x' (an image), processes it with Mediapipe, and returns the Jacobians and keypoints for detected keypoints.
         """
-        if image_path is not None:
-            # Step 1: Process image with Mediapipe and get keypoints
-            image, mediapipe_keypoints = self.process_image_with_mediapipe(image_path)
+        # Step 1: Convert the tensor 'x' (image) to a NumPy array suitable for Mediapipe
+        image = self.tensor_to_numpy_image(x)
 
-            # Step 2: Normalize the Mediapipe keypoints to the model's coordinate system
-            normalized_keypoints = self.normalize_mediapipe_keypoints(
-                mediapipe_keypoints, image.shape
-            )
+        # Step 2: Process image with Mediapipe and get keypoints
+        mediapipe_keypoints = self.process_image_with_mediapipe(image)
 
-            # Step 3: Create heatmap using Mediapipe keypoints
-            heatmap = self.create_heatmap_from_keypoints(
-                normalized_keypoints, spatial_size=(x.shape[2], x.shape[3])
-            )
+        # Step 3: Normalize the Mediapipe keypoints to the model's coordinate system
+        normalized_keypoints = self.normalize_mediapipe_keypoints(mediapipe_keypoints, image.shape)
 
-            # Step 4: Predict Jacobians using the KPDetector's internal functions
-            feature_map = self.predictor(x)  # Get the feature map
-            jacobian_map = self.jacobian(feature_map)  # Jacobian from feature map
-            jacobian_map = jacobian_map.view(
-                1, self.num_jacobian_maps, 4, x.shape[2], x.shape[3]
-            )
+        # Step 4: Create heatmap using Mediapipe keypoints
+        heatmap = self.create_heatmap_from_keypoints(normalized_keypoints, spatial_size=(x.shape[2], x.shape[3]))
 
-            # Step 5: Multiply heatmap with Jacobian map and sum over spatial dimensions
-            heatmap = heatmap.unsqueeze(2)  # Shape: (1, num_keypoints, 1, H, W)
-            jacobian = heatmap * jacobian_map
-            jacobian = jacobian.view(1, self.num_jacobian_maps, 4, -1).sum(dim=-1)
-            jacobian = jacobian.view(
-                1, self.num_jacobian_maps, 2, 2
-            )  # Final shape: (1, num_keypoints, 2, 2)
+        # Step 5: Predict Jacobians using the KPDetector's internal functions
+        feature_map = self.predictor(x)  # Get the feature map
+        jacobian_map = self.jacobian(feature_map)  # Jacobian from feature map
+        jacobian_map = jacobian_map.view(1, self.num_jacobian_maps, 4, x.shape[2], x.shape[3])
 
-            # Include the 'value' key, i.e., the normalized keypoints
-            return {
-                "value": normalized_keypoints.unsqueeze(
-                    0
-                ),  # Shape: (1, num_keypoints, 2)
-                "jacobian": jacobian,
-            }
-        else:
-            # If no image is provided, fallback to the default behavior
-            return super(MediapipeKPDetector, self).forward(x)
+        # Step 6: Multiply heatmap with Jacobian map and sum over spatial dimensions
+        heatmap = heatmap.unsqueeze(2)  # Shape: (1, num_keypoints, 1, H, W)
+        jacobian = heatmap * jacobian_map
+        jacobian = jacobian.view(1, self.num_jacobian_maps, 4, -1).sum(dim=-1)
+        jacobian = jacobian.view(1, self.num_jacobian_maps, 2, 2)  # Final shape: (1, num_keypoints, 2, 2)
 
-    def process_image_with_mediapipe(self, image_path):
+        # Include the 'value' key, i.e., the normalized keypoints
+        return {
+            'value': normalized_keypoints.unsqueeze(0),  # Shape: (1, num_keypoints, 2)
+            'jacobian': jacobian
+        }
+    
+    def tensor_to_numpy_image(self, x):
         """
-        Process the image using Mediapipe and return the detected keypoints and the processed image.
+        Converts a PyTorch tensor to a NumPy image array suitable for Mediapipe.
         """
-        # Load the image
-        image = cv2.imread(image_path)
-        if image is None:
-            raise ValueError(f"Unable to load image from path: {image_path}")
+        # Convert from tensor (C, H, W) to NumPy array (H, W, C)
+        x = x.squeeze(0)  # Remove batch dimension if necessary
+        x = x.permute(1, 2, 0).cpu().numpy()  # Change from (C, H, W) to (H, W, C)
 
+        # Convert from [0,1] float to [0,255] uint8 format if necessary
+        if x.max() <= 1:
+            x = (x * 255).astype(np.uint8)
+
+        return x
+
+    def process_image_with_mediapipe(self, image):
+        """
+        Process the image using Mediapipe and return the detected keypoints.
+        """
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         # Process with Mediapipe
@@ -196,8 +193,7 @@ class MediapipeKPDetector(_KPDetector):
             static_image_mode=True,
             max_num_faces=1,
             refine_landmarks=True,
-            min_detection_confidence=0.5,
-        ) as face_mesh:
+            min_detection_confidence=0.5) as face_mesh:
 
             results = face_mesh.process(image_rgb)
 
@@ -208,14 +204,11 @@ class MediapipeKPDetector(_KPDetector):
 
             # Extract the filtered landmarks (face, eyes, eyebrows, nose, mouth, cheeks)
             filtered_landmarks = self.get_filtered_landmarks()
-            keypoints = [
-                (int(landmarks[i].x * w), int(landmarks[i].y * h))
-                for i in filtered_landmarks
-            ]
+            keypoints = [(int(landmarks[i].x * w), int(landmarks[i].y * h)) for i in filtered_landmarks]
         else:
             raise ValueError("No face landmarks detected!")
 
-        return image, keypoints
+        return keypoints
 
     def get_filtered_landmarks(self):
         """
