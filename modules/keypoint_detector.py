@@ -110,8 +110,29 @@ class _KPDetector(nn.Module):
 
 
 class MediapipeKPDetector(_KPDetector):
-    def __init__(self, kp_variance=0.01):
-        super(MediapipeKPDetector, self).__init__(kp_variance=kp_variance)
+    def __init__(self, 
+                 block_expansion,
+                num_kp,
+                num_channels,
+                max_features,
+                num_blocks,
+                temperature,
+                estimate_jacobian=False,
+                scale_factor=1,
+                single_jacobian_map=False,
+                pad=0,
+                kp_variance=0.01):
+        super(MediapipeKPDetector, self).__init__(block_expansion=block_expansion,
+                num_kp=num_kp,
+                num_channels=num_channels,
+                max_features=max_features,
+                num_blocks=num_blocks,
+                temperature=temperature,
+                estimate_jacobian=estimate_jacobian,
+                scale_factor=scale_factor,
+                single_jacobian_map=single_jacobian_map,
+                pad=pad,
+                kp_variance=kp_variance)
         self.mp_face_mesh = mp.solutions.face_mesh
 
     def forward(self, x, image_path=None):

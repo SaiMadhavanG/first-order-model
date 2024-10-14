@@ -13,18 +13,17 @@ dataset_params:
       saturation: 0.1
       hue: 0.1
 
-
 model_params:
   common_params:
-    num_kp: 10
+    num_kp: 190
     num_channels: 3
     estimate_jacobian: True
   kp_detector_params:
-     temperature: 0.1
-     block_expansion: 32
-     max_features: 1024
-     scale_factor: 0.25
-     num_blocks: 5
+    temperature: 0.1
+    block_expansion: 32
+    max_features: 1024
+    scale_factor: 0.25
+    num_blocks: 5
   generator_params:
     block_expansion: 64
     max_features: 512
@@ -67,11 +66,11 @@ train_params:
 
 reconstruction_params:
   num_videos: 1000
-  format: '.mp4'
+  format: ".mp4"
 
 animate_params:
   num_pairs: 50
-  format: '.mp4'
+  format: ".mp4"
   normalization_params:
     adapt_movement_scale: False
     use_relative_movement: True
@@ -80,4 +79,4 @@ animate_params:
 visualizer_params:
   kp_size: 5
   draw_border: True
-  colormap: 'gist_rainbow'
+  colormap: "gist_rainbow"
