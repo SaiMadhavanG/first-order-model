@@ -55,16 +55,14 @@ def load_checkpoints(config_path, checkpoint_path, cpu=False):
     return generator, kp_detector
 
 
-def make_animation(source_image, source_image_lmks, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False):
+def make_animation(source_image, driving_video, generator, kp_detector, relative=True, adapt_movement_scale=True, cpu=False):
     with torch.no_grad():
         predictions = []
         source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
-        source_lmks = torch.tensor(source_image_lmks[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
         if not cpu:
             source = source.cuda()
-            source_lmks = source_lmks.cuda()
         driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
-        kp_source = kp_detector(source_lmks)
+        kp_source = kp_detector(source)
         kp_driving_initial = kp_detector(driving[:, :, 0])
 
         for frame_idx in tqdm(range(driving.shape[2])):
@@ -112,7 +110,6 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", default='vox-cpk.pth.tar', help="path to checkpoint to restore")
 
     parser.add_argument("--source_image", default='sup-mat/source.png', help="path to source image")
-    parser.add_argument("--source_image_lmks", default='sup-mat/source.png', help="path to source image landmarks")
     parser.add_argument("--driving_video", default='driving.mp4', help="path to driving video")
     parser.add_argument("--result_video", default='result.mp4', help="path to output")
 
@@ -135,7 +132,6 @@ if __name__ == "__main__":
     opt = parser.parse_args()
 
     source_image = imageio.imread(opt.source_image)
-    source_image_lmks = imageio.imread(opt.source_image_lmks)
     reader = imageio.get_reader(opt.driving_video)
     fps = reader.get_meta_data()['fps']
     driving_video = []
@@ -147,21 +143,19 @@ if __name__ == "__main__":
     reader.close()
 
     source_image = resize(source_image, (256, 256))[..., :3]
-    source_image_lmks = resize(source_image_lmks, (256, 256))[..., :3]
     driving_video = [resize(frame, (256, 256))[..., :3] for frame in driving_video]
     generator, kp_detector = load_checkpoints(config_path=opt.config, checkpoint_path=opt.checkpoint, cpu=opt.cpu)
 
     if opt.find_best_frame or opt.best_frame is not None:
-        # i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, driving_video, cpu=opt.cpu)
-        # print("Best frame: " + str(i))
-        # driving_forward = driving_video[i:]
-        # driving_backward = driving_video[:(i+1)][::-1]
-        # predictions_forward = make_animation(source_image, driving_forward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
-        # predictions_backward = make_animation(source_image, driving_backward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
-        # predictions = predictions_backward[::-1] + predictions_forward[1:]
-        raise NotImplementedError("This feature is not implemented. Please use the original code.")
+        i = opt.best_frame if opt.best_frame is not None else find_best_frame(source_image, driving_video, cpu=opt.cpu)
+        print("Best frame: " + str(i))
+        driving_forward = driving_video[i:]
+        driving_backward = driving_video[:(i+1)][::-1]
+        predictions_forward = make_animation(source_image, driving_forward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
+        predictions_backward = make_animation(source_image, driving_backward, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
+        predictions = predictions_backward[::-1] + predictions_forward[1:]
     else:
-        predictions = make_animation(source_image, source_image_lmks, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
+        predictions = make_animation(source_image, driving_video, generator, kp_detector, relative=opt.relative, adapt_movement_scale=opt.adapt_scale, cpu=opt.cpu)
     imageio.mimsave(opt.result_video, [img_as_ubyte(frame) for frame in predictions], fps=fps)
 
     if opt.audio:
