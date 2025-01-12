@@ -3,6 +3,65 @@ import torch.nn.functional as F
 import torch
 from modules.util import Hourglass, AntiAliasInterpolation2d, make_coordinate_grid, kp2gaussian
 
+class FeatureProjector(nn.Module):
+    def __init__(self):
+        super(FeatureProjector, self).__init__()
+        
+        # Convolutional block 1
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1), # Output: (B, 64, 128, 128)
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True)
+        )
+        
+        # Convolutional block 2
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1), # Output: (B, 128, 64, 64)
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True)
+        )
+        
+        # Convolutional block 3
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1), # Output: (B, 256, 32, 32)
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True)
+        )
+        
+        # Convolutional block 4
+        self.conv4 = nn.Sequential(
+            nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1), # Output: (B, 512, 16, 16)
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True)
+        )
+        
+        # Convolutional block 5
+        self.conv5 = nn.Sequential(
+            nn.Conv2d(512, 512, kernel_size=3, stride=2, padding=1), # Output: (B, 512, 8, 8)
+            nn.BatchNorm2d(512),
+            nn.ReLU(inplace=True)
+        )
+        
+        # Fully connected layers
+        self.fc1 = nn.Linear(512 * 8 * 8, 2048) # Flatten (512, 8, 8) to (B, 2048)
+        self.fc2 = nn.Linear(2048, 1024)        # Reduce to (B, 1024)
+        
+    def forward(self, x):
+        # Apply convolutional blocks
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.conv4(x)
+        x = self.conv5(x)
+        
+        # Flatten the output of the last convolutional layer
+        x = x.view(x.size(0), -1)  # Flatten to (B, 512 * 8 * 8)
+        
+        # Apply fully connected layers
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)  # No activation for the final layer
+        
+        return x
 
 class DenseMotionNetwork(nn.Module):
     """
@@ -16,6 +75,8 @@ class DenseMotionNetwork(nn.Module):
                                    max_features=max_features, num_blocks=num_blocks)
 
         self.mask = nn.Conv2d(self.hourglass.out_filters, num_kp + 1, kernel_size=(7, 7), padding=(3, 3))
+
+        self.feature_projector = FeatureProjector()
 
         if estimate_occlusion_map:
             self.occlusion = nn.Conv2d(self.hourglass.out_filters, 1, kernel_size=(7, 7), padding=(3, 3))
@@ -77,6 +138,15 @@ class DenseMotionNetwork(nn.Module):
         sparse_deformed = F.grid_sample(source_repeat, sparse_motions)
         sparse_deformed = sparse_deformed.view((bs, self.num_kp + 1, -1, h, w))
         return sparse_deformed
+    
+    def deform_input(self, inp, deformation):
+        _, h_old, w_old, _ = deformation.shape
+        _, _, h, w = inp.shape
+        if h_old != h or w_old != w:
+            deformation = deformation.permute(0, 3, 1, 2)
+            deformation = F.interpolate(deformation, size=(h, w), mode='bilinear')
+            deformation = deformation.permute(0, 2, 3, 1)
+        return F.grid_sample(inp, deformation)
 
     def forward(self, source_image, kp_driving, kp_source):
         if self.scale_factor != 1:
@@ -109,5 +179,7 @@ class DenseMotionNetwork(nn.Module):
         if self.occlusion:
             occlusion_map = torch.sigmoid(self.occlusion(prediction))
             out_dict['occlusion_map'] = occlusion_map
+
+        out_dict['deformed'] = self.deform_input(source_image, deformation)
 
         return out_dict

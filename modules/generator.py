@@ -3,6 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from modules.util import ResBlock2d, SameBlock2d, UpBlock2d, DownBlock2d
 from modules.dense_motion import DenseMotionNetwork
+from modules.av_attention import AVAttention2D
 
 
 class OcclusionAwareGenerator(nn.Module):
@@ -47,6 +48,10 @@ class OcclusionAwareGenerator(nn.Module):
         self.estimate_occlusion_map = estimate_occlusion_map
         self.num_channels = num_channels
 
+        self.av_attention = AVAttention2D(embed_dim=256, num_heads=8, dropout=0.1)
+
+        self.pre_bottleneck = nn.Conv2d(513, 256, kernel_size=(3, 3), padding=(1, 1))
+
     def deform_input(self, inp, deformation):
         _, h_old, w_old, _ = deformation.shape
         _, _, h, w = inp.shape
@@ -56,7 +61,7 @@ class OcclusionAwareGenerator(nn.Module):
             deformation = deformation.permute(0, 2, 3, 1)
         return F.grid_sample(inp, deformation)
 
-    def forward(self, source_image, kp_driving, kp_source):
+    def forward(self, source_image, kp_driving, kp_source, mel_features, wav2vec2_features):
         # Encoding (downsampling) part
         out = self.first(source_image)
         for i in range(len(self.down_blocks)):
@@ -83,8 +88,14 @@ class OcclusionAwareGenerator(nn.Module):
                     occlusion_map = F.interpolate(occlusion_map, size=out.shape[2:], mode='bilinear')
                 out = out * occlusion_map
 
-            output_dict["deformed"] = self.deform_input(source_image, deformation)
+            output_dict["deformed"] = dense_motion["deformed"]
 
+        # Audio-visual attention
+        attn = self.av_attention(out, mel_features, out)
+        out = torch.concat([out, attn, wav2vec2_features], dim=1)
+
+        out = self.pre_bottleneck(out)
+        
         # Decoding part
         out = self.bottleneck(out)
         for i in range(len(self.up_blocks)):
