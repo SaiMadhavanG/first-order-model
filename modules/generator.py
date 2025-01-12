@@ -91,7 +91,7 @@ class OcclusionAwareGenerator(nn.Module):
             output_dict["deformed"] = dense_motion["deformed"]
 
         # Audio-visual attention
-        attn = self.av_attention(out, mel_features, out)
+        attn = self.av_attention(mel_features, out)
         out = torch.concat([out, attn, wav2vec2_features], dim=1)
 
         out = self.pre_bottleneck(out)

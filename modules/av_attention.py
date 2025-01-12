@@ -9,10 +9,24 @@ class AVAttention2D(nn.Module):
         self.proj = nn.Linear(embed_dim * 2, embed_dim)  # Fuse the two outputs
         self.norm = nn.LayerNorm(embed_dim)
 
+        # Positional embedding for spatial dimensions
+        self.positional_embedding = nn.Parameter(torch.randn(1, embed_dim, 64, 64))  # (1, 256, 64, 64)
+
     def forward(self, audio, visual):
-        # audio, visual: (B, 256, 64, 64)
+        """
+        Args:
+            audio (torch.Tensor): Audio input of shape (B, 256, 64, 64)
+            visual (torch.Tensor): Visual input of shape (B, 256, 64, 64)
+
+        Returns:
+            torch.Tensor: Fused attention output of shape (B, 256, 64, 64)
+        """
         B, C, H, W = audio.shape
         spatial_dim = H * W
+
+        # Add positional embeddings
+        audio = audio + self.positional_embedding
+        visual = visual + self.positional_embedding
 
         # Flatten spatial dimensions
         audio_flat = audio.view(B, C, spatial_dim).permute(0, 2, 1)  # (B, 4096, 256)
