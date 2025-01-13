@@ -48,8 +48,15 @@ class OcclusionAwareGenerator(nn.Module):
         self.estimate_occlusion_map = estimate_occlusion_map
         self.num_channels = num_channels
 
-        self.av_attention = AVAttention2D(embed_dim=256, num_heads=8, dropout=0.1)
-
+        self.audio_proj = nn.Linear(1024, 256)
+        self.av_attention = AVAttention2D(embed_dim=256)
+        self.transpose_conv = nn.ConvTranspose2d(
+            in_channels=256,
+            out_channels=256,
+            kernel_size=64,
+            stride=64,
+            padding=0  # No padding for exact upscaling
+        )
         self.pre_bottleneck = nn.Conv2d(513, 256, kernel_size=(3, 3), padding=(1, 1))
 
     def deform_input(self, inp, deformation):
@@ -61,7 +68,7 @@ class OcclusionAwareGenerator(nn.Module):
             deformation = deformation.permute(0, 2, 3, 1)
         return F.grid_sample(inp, deformation)
 
-    def forward(self, source_image, kp_driving, kp_source, mel_features, wav2vec2_features):
+    def forward(self, source_image, kp_driving, kp_source, wav2vec2_feature):
         # Encoding (downsampling) part
         out = self.first(source_image)
         for i in range(len(self.down_blocks)):
@@ -91,8 +98,10 @@ class OcclusionAwareGenerator(nn.Module):
             output_dict["deformed"] = dense_motion["deformed"]
 
         # Audio-visual attention
-        attn = self.av_attention(mel_features, out)
-        out = torch.concat([out, attn, wav2vec2_features], dim=1)
+        audio_feature = self.audio_proj(wav2vec2_feature)
+        attn = self.av_attention(audio_feature, out)
+        transposed_feature = self.transpose_conv(audio_feature.view(-1, 256, 1, 1))
+        out = torch.concat([out, transposed_feature, attn], dim=1)
 
         out = self.pre_bottleneck(out)
         

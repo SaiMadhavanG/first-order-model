@@ -111,7 +111,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--source_image", default='sup-mat/source.png', help="path to source image")
     parser.add_argument("--driving_video", default='driving.mp4', help="path to driving video")
-    parser.add_argument("--result_video", default='result.mp4', help="path to output")
+    parser.add_argument("--result_video", default='result_.mp4', help="path to output")
 
     parser.add_argument("--relative", dest="relative", action="store_true", help="use relative or absolute keypoint coordinates")
     parser.add_argument("--adapt_scale", dest="adapt_scale", action="store_true", help="adapt movement scale based on convex hull of keypoints")
@@ -161,8 +161,8 @@ if __name__ == "__main__":
     if opt.audio:
         try:
             with NamedTemporaryFile(suffix=splitext(opt.result_video)[1]) as output:
-                ffmpeg.output(ffmpeg.input(opt.result_video).video, ffmpeg.input(opt.driving_video).audio, output.name, c='copy').run()
-                with open(opt.result_video, 'wb') as result:
-                    copyfileobj(output, result)
+                ffmpeg.output(ffmpeg.input(opt.result_video).video, ffmpeg.input(opt.driving_video).audio, "result.mp4", c='copy').run()
+                # with open(opt.result_video, 'wb') as result:
+                #     copyfileobj(output, result)
         except ffmpeg.Error:
             print("Failed to copy audio: the driving video may have no audio track or the audio format is invalid.")
