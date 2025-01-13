@@ -129,9 +129,10 @@ class GeneratorFullModel(torch.nn.Module):
     Merge all generator related updates into single model for better multi-gpu usage
     """
 
-    def __init__(self, kp_extractor, generator, discriminator, train_params):
+    def __init__(self, kp_extractor_source, kp_extractor_driver, generator, discriminator, train_params):
         super(GeneratorFullModel, self).__init__()
-        self.kp_extractor = kp_extractor
+        self.kp_extractor_source = kp_extractor_source
+        self.kp_extractor_driver = kp_extractor_driver
         self.generator = generator
         self.discriminator = discriminator
         self.train_params = train_params
@@ -149,10 +150,10 @@ class GeneratorFullModel(torch.nn.Module):
                 self.vgg = self.vgg.cuda()
 
     def forward(self, x):
-        kp_source = self.kp_extractor(x['source'])
-        kp_driving = self.kp_extractor(x['driving'])
+        kp_source = self.kp_extractor_source(x['source'])
+        kp_driving = self.kp_extractor_driver(x['driving'])
 
-        generated = self.generator(x['source'], kp_source=kp_source, kp_driving=kp_driving)
+        generated = self.generator(x['source'][:, :3, :, :], kp_source=kp_source, kp_driving=kp_driving, wav2vec2_feature=x['audio'])
         generated.update({'kp_source': kp_source, 'kp_driving': kp_driving})
 
         loss_values = {}
@@ -181,16 +182,8 @@ class GeneratorFullModel(torch.nn.Module):
                 value_total += self.loss_weights['generator_gan'] * value
             loss_values['gen_gan'] = value_total
 
-            if sum(self.loss_weights['feature_matching']) != 0:
-                value_total = 0
-                for scale in self.disc_scales:
-                    key = 'feature_maps_%s' % scale
-                    for i, (a, b) in enumerate(zip(discriminator_maps_real[key], discriminator_maps_generated[key])):
-                        if self.loss_weights['feature_matching'][i] == 0:
-                            continue
-                        value = torch.abs(a - b).mean()
-                        value_total += self.loss_weights['feature_matching'][i] * value
-                    loss_values['feature_matching'] = value_total
+            if sum(self.loss_weights['l1']) != 0:
+                loss_values['l1'] = self.loss_weights['l1'][0] * F.l1_loss(generated['prediction'], x['driving'])
 
         if (self.loss_weights['equivariance_value'] + self.loss_weights['equivariance_jacobian']) != 0:
             transform = Transform(x['driving'].shape[0], **self.train_params['transform_params'])
@@ -227,9 +220,10 @@ class DiscriminatorFullModel(torch.nn.Module):
     Merge all discriminator related updates into single model for better multi-gpu usage
     """
 
-    def __init__(self, kp_extractor, generator, discriminator, train_params):
+    def __init__(self, kp_extractor_source, kp_extractor_driver, generator, discriminator, train_params):
         super(DiscriminatorFullModel, self).__init__()
-        self.kp_extractor = kp_extractor
+        self.kp_extractor_source = kp_extractor_source
+        self.kp_extractor_driver = kp_extractor_driver
         self.generator = generator
         self.discriminator = discriminator
         self.train_params = train_params

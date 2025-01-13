@@ -13,17 +13,19 @@ from sync_batchnorm import DataParallelWithCallback
 from frames_dataset import DatasetRepeater
 
 
-def train(config, generator, discriminator, kp_detector, checkpoint, log_dir, dataset, device_ids):
+def train(config, generator, discriminator, kp_detector_source, kp_detector_driver, checkpoint, log_dir, dataset, device_ids):
     train_params = config['train_params']
 
     optimizer_generator = torch.optim.Adam(generator.parameters(), lr=train_params['lr_generator'], betas=(0.5, 0.999))
     optimizer_discriminator = torch.optim.Adam(discriminator.parameters(), lr=train_params['lr_discriminator'], betas=(0.5, 0.999))
-    optimizer_kp_detector = torch.optim.Adam(kp_detector.parameters(), lr=train_params['lr_kp_detector'], betas=(0.5, 0.999))
+    optimizer_kps_detector = torch.optim.Adam(kp_detector_source.parameters(), lr=train_params['lr_kp_detector'], betas=(0.5, 0.999))
+    optimizer_kpd_detector = torch.optim.Adam(kp_detector_driver.parameters(), lr=train_params['lr_kp_detector'], betas=(0.5, 0.999))
 
     if checkpoint is not None:
-        start_epoch = Logger.load_cpk(checkpoint, generator, discriminator, kp_detector,
+        start_epoch = Logger.load_cpk(checkpoint, generator, discriminator, kp_detector_source, kp_detector_driver,
                                       optimizer_generator, optimizer_discriminator,
-                                      None if train_params['lr_kp_detector'] == 0 else optimizer_kp_detector)
+                                      None if train_params['lr_kp_detector'] == 0 else optimizer_kps_detector,
+                                      None if train_params['lr_kp_detector'] == 0 else optimizer_kpd_detector)
     else:
         start_epoch = 0
 
@@ -31,15 +33,17 @@ def train(config, generator, discriminator, kp_detector, checkpoint, log_dir, da
                                       last_epoch=start_epoch - 1)
     scheduler_discriminator = MultiStepLR(optimizer_discriminator, train_params['epoch_milestones'], gamma=0.1,
                                           last_epoch=start_epoch - 1)
-    scheduler_kp_detector = MultiStepLR(optimizer_kp_detector, train_params['epoch_milestones'], gamma=0.1,
+    scheduler_kps_detector = MultiStepLR(optimizer_kps_detector, train_params['epoch_milestones'], gamma=0.1,
+                                        last_epoch=-1 + start_epoch * (train_params['lr_kp_detector'] != 0))
+    scheduler_kpd_detector = MultiStepLR(optimizer_kpd_detector, train_params['epoch_milestones'], gamma=0.1,
                                         last_epoch=-1 + start_epoch * (train_params['lr_kp_detector'] != 0))
 
     if 'num_repeats' in train_params or train_params['num_repeats'] != 1:
         dataset = DatasetRepeater(dataset, train_params['num_repeats'])
     dataloader = DataLoader(dataset, batch_size=train_params['batch_size'], shuffle=True, num_workers=6, drop_last=True)
 
-    generator_full = GeneratorFullModel(kp_detector, generator, discriminator, train_params)
-    discriminator_full = DiscriminatorFullModel(kp_detector, generator, discriminator, train_params)
+    generator_full = GeneratorFullModel(kp_detector_source, kp_detector_driver, generator, discriminator, train_params)
+    discriminator_full = DiscriminatorFullModel(kp_detector_source, kp_detector_driver, generator, discriminator, train_params)
 
     if torch.cuda.is_available():
         generator_full = DataParallelWithCallback(generator_full, device_ids=device_ids)
@@ -56,8 +60,10 @@ def train(config, generator, discriminator, kp_detector, checkpoint, log_dir, da
                 loss.backward()
                 optimizer_generator.step()
                 optimizer_generator.zero_grad()
-                optimizer_kp_detector.step()
-                optimizer_kp_detector.zero_grad()
+                optimizer_kps_detector.step()
+                optimizer_kps_detector.zero_grad()
+                optimizer_kpd_detector.step()
+                optimizer_kpd_detector.zero_grad()
 
                 if train_params['loss_weights']['generator_gan'] != 0:
                     optimizer_discriminator.zero_grad()
@@ -77,11 +83,14 @@ def train(config, generator, discriminator, kp_detector, checkpoint, log_dir, da
 
             scheduler_generator.step()
             scheduler_discriminator.step()
-            scheduler_kp_detector.step()
+            scheduler_kps_detector.step()
+            scheduler_kpd_detector.step()
             
             logger.log_epoch(epoch, {'generator': generator,
                                      'discriminator': discriminator,
-                                     'kp_detector': kp_detector,
+                                     'kp_detector_source': kp_detector_source,
+                                     'kp_detector_driver': kp_detector_driver,
                                      'optimizer_generator': optimizer_generator,
                                      'optimizer_discriminator': optimizer_discriminator,
-                                     'optimizer_kp_detector': optimizer_kp_detector}, inp=x, out=generated)
+                                     'optimizer_kps_detector': optimizer_kps_detector,
+                                     'optimizer_kpd_detector': optimizer_kpd_detector}, inp=x, out=generated)

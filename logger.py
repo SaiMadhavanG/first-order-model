@@ -8,11 +8,11 @@ from skimage.draw import disk
 
 import matplotlib.pyplot as plt
 import collections
+from torch.utils.tensorboard import SummaryWriter
 
 
 class Logger:
     def __init__(self, log_dir, checkpoint_freq=100, visualizer_params=None, zfill_num=8, log_file_name='log.txt'):
-
         self.loss_list = []
         self.cpk_dir = log_dir
         self.visualizations_dir = os.path.join(log_dir, 'train-vis')
@@ -26,19 +26,31 @@ class Logger:
         self.best_loss = float('inf')
         self.names = None
 
+        # TensorBoard writer
+        self.tensorboard_writer = SummaryWriter(log_dir=os.path.join(log_dir, 'tensorboard'))
+
     def log_scores(self, loss_names):
         loss_mean = np.array(self.loss_list).mean(axis=0)
 
+        # Log to the log file
         loss_string = "; ".join(["%s - %.5f" % (name, value) for name, value in zip(loss_names, loss_mean)])
         loss_string = str(self.epoch).zfill(self.zfill_num) + ") " + loss_string
-
         print(loss_string, file=self.log_file)
-        self.loss_list = []
         self.log_file.flush()
+
+        # Log to TensorBoard
+        for name, value in zip(loss_names, loss_mean):
+            self.tensorboard_writer.add_scalar(f"Loss/{name}", value, self.epoch)
+
+        self.loss_list = []
 
     def visualize_rec(self, inp, out):
         image = self.visualizer.visualize(inp['driving'], inp['source'], out)
-        imageio.imsave(os.path.join(self.visualizations_dir, "%s-rec.png" % str(self.epoch).zfill(self.zfill_num)), image)
+        save_path = os.path.join(self.visualizations_dir, "%s-rec.png" % str(self.epoch).zfill(self.zfill_num))
+        imageio.imsave(save_path, image)
+
+        # Log the visualization to TensorBoard
+        self.tensorboard_writer.add_image(f"Visualization/epoch-{self.epoch}", image, self.epoch, dataformats='HWC')
 
     def save_cpk(self, emergent=False):
         cpk = {k: v.state_dict() for k, v in self.models.items()}
@@ -48,8 +60,8 @@ class Logger:
             torch.save(cpk, cpk_path)
 
     @staticmethod
-    def load_cpk(checkpoint_path, generator=None, discriminator=None, kp_detector=None,
-                 optimizer_generator=None, optimizer_discriminator=None, optimizer_kp_detector=None):
+    def load_cpk(checkpoint_path, generator=None, discriminator=None, kp_detector_source=None, kp_detector_driver=None,
+                 optimizer_generator=None, optimizer_discriminator=None, optimizer_kps_detector=None, optimizer_kpd_detector=None):
         if torch.cuda.is_available():
             map_location = None
         else:
@@ -57,8 +69,10 @@ class Logger:
         checkpoint = torch.load(checkpoint_path, map_location)
         if generator is not None:
             generator.load_state_dict(checkpoint['generator'])
-        if kp_detector is not None:
-            kp_detector.load_state_dict(checkpoint['kp_detector'])
+        if kp_detector_source is not None:
+            kp_detector_source.load_state_dict(checkpoint['kp_detector_source'])
+        if kp_detector_driver is not None:
+            kp_detector_driver.load_state_dict(checkpoint['kp_detector_driver'])
         if discriminator is not None:
             try:
                discriminator.load_state_dict(checkpoint['discriminator'])
@@ -71,8 +85,10 @@ class Logger:
                 optimizer_discriminator.load_state_dict(checkpoint['optimizer_discriminator'])
             except RuntimeError as e:
                 print ('No discriminator optimizer in the state-dict. Optimizer will be not initialized')
-        if optimizer_kp_detector is not None:
-            optimizer_kp_detector.load_state_dict(checkpoint['optimizer_kp_detector'])
+        if optimizer_kps_detector is not None:
+            optimizer_kps_detector.load_state_dict(checkpoint['optimizer_kps_detector'])
+        if optimizer_kpd_detector is not None:
+            optimizer_kpd_detector.load_state_dict(checkpoint['optimizer_kpd_detector'])
 
         return checkpoint['epoch']
 
@@ -83,6 +99,7 @@ class Logger:
         if 'models' in self.__dict__:
             self.save_cpk()
         self.log_file.close()
+        self.tensorboard_writer.close()
 
     def log_iter(self, losses):
         losses = collections.OrderedDict(losses.items())
@@ -138,7 +155,7 @@ class Visualizer:
         images = []
 
         # Source image with keypoints
-        source = source.data.cpu()
+        source = source[:, :3, :, :].data.cpu()
         kp_source = out['kp_source']['value'].data.cpu().numpy()
         source = np.transpose(source, [0, 2, 3, 1])
         images.append((source, kp_source))
@@ -171,7 +188,7 @@ class Visualizer:
         images.append(prediction)
 
 
-        ## Occlusion map
+        # Occlusion map
         if 'occlusion_map' in out:
             occlusion_map = out['occlusion_map'].data.cpu().repeat(1, 3, 1, 1)
             occlusion_map = F.interpolate(occlusion_map, size=source.shape[1:3]).numpy()
@@ -205,6 +222,11 @@ class Visualizer:
                 full_mask.append(mask * color)
 
             images.append(sum(full_mask))
+
+        if 'attention_map' in out:
+            attention_map = out['attention_map'].data.cpu().numpy()
+            attention_map = np.transpose(attention_map, [0, 2, 3, 1])
+            images.append(attention_map)
 
         image = self.create_image_grid(*images)
         image = (255 * image).astype(np.uint8)

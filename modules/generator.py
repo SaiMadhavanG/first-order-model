@@ -100,6 +100,7 @@ class OcclusionAwareGenerator(nn.Module):
         # Audio-visual attention
         audio_feature = self.audio_proj(wav2vec2_feature)
         attn = self.av_attention(audio_feature, out)
+        output_dict["attention_map"] = attn
         transposed_feature = self.transpose_conv(audio_feature.view(-1, 256, 1, 1))
         out = torch.concat([out, transposed_feature, attn], dim=1)
 

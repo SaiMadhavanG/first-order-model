@@ -60,14 +60,15 @@ if __name__ == "__main__":
     if opt.verbose:
         print(discriminator)
 
-    kp_detector = KPDetector(**config['model_params']['kp_detector_params'],
+    kp_detector_source = KPDetector(**config['model_params']['kp_detector_source_params'],
+                             **config['model_params']['common_params'])
+
+    kp_detector_driving = KPDetector(**config['model_params']['kp_detector_params'],
                              **config['model_params']['common_params'])
 
     if torch.cuda.is_available():
-        kp_detector.to(opt.device_ids[0])
-
-    if opt.verbose:
-        print(kp_detector)
+        kp_detector_source.to(opt.device_ids[0])
+        kp_detector_driving.to(opt.device_ids[0])
 
     dataset = FramesDataset(is_train=(opt.mode == 'train'), **config['dataset_params'])
 
@@ -78,10 +79,10 @@ if __name__ == "__main__":
 
     if opt.mode == 'train':
         print("Training...")
-        train(config, generator, discriminator, kp_detector, opt.checkpoint, log_dir, dataset, opt.device_ids)
+        train(config, generator, discriminator, kp_detector_source, kp_detector_driving, opt.checkpoint, log_dir, dataset, opt.device_ids)
     elif opt.mode == 'reconstruction':
         print("Reconstruction...")
-        reconstruction(config, generator, kp_detector, opt.checkpoint, log_dir, dataset)
+        reconstruction(config, generator, kp_detector_source, kp_detector_driving, opt.checkpoint, log_dir, dataset)
     elif opt.mode == 'animate':
         print("Animate...")
-        animate(config, generator, kp_detector, opt.checkpoint, log_dir, dataset)
+        animate(config, generator, kp_detector_source, kp_detector_driving, opt.checkpoint, log_dir, dataset)
