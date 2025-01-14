@@ -26,8 +26,6 @@ def read_video(name, frame_shape):
             [img_as_float32(io.imread(os.path.join(name, frames[idx]))) for idx in range(num_frames)])
     elif name.lower().endswith('.png') or name.lower().endswith('.jpg'):
         image = io.imread(name)
-        identity = image.copy()
-
         if len(image.shape) == 2 or image.shape[2] == 1:
             image = gray2rgb(image)
 
@@ -129,20 +127,20 @@ class FramesDataset(Dataset):
 
         out = {}
 
-        source = np.concatenate(np.array(video_array[0], dtype='float32'), np.array(lmks_array[0], dtype='float32'), axis=2)
+        source = np.array(video_array[0], dtype='float32')
+        source_lmks = np.array(lmks_array[0], dtype='float32')
         driving = np.array(video_array[1], dtype='float32')
+        driving_lmks = np.array(lmks_array[1], dtype='float32')
         audio = np.array(audio_array[1], dtype='float32')
         # print("annotated: ", type(annotated_image_driving), annotated_image_driving)
         # exit()
 
-        if self.is_train:
-            out['driving'] = driving.transpose((2, 0, 1))
-            out['source'] = source.transpose((2, 0, 1))
-            out['audio'] = audio
-        else:
-            out['source'] = source.transpose((2, 0, 1))
-            out['driving'] = driving.transpose((2, 0, 1))
-            out['audio'] = audio
+        out['driving'] = driving.transpose((2, 0, 1))
+        out['source'] = source.transpose((2, 0, 1))
+        out['driving_lmks'] = driving_lmks.transpose((2, 0, 1))
+        out['source_lmks'] = source_lmks.transpose((2, 0, 1))
+        out['audio'] = audio
+        
 
         out['name'] = video_name
 

@@ -150,8 +150,8 @@ class GeneratorFullModel(torch.nn.Module):
                 self.vgg = self.vgg.cuda()
 
     def forward(self, x):
-        kp_source = self.kp_extractor_source(x['source'])
-        kp_driving = self.kp_extractor_driver(x['driving'])
+        kp_source = self.kp_extractor_source(torch.concat(x['source'], x['source_lmk'], dim=1))
+        kp_driving = self.kp_extractor_driver(x['driving_lmk'])
 
         generated = self.generator(x['source'][:, :3, :, :], kp_source=kp_source, kp_driving=kp_driving, wav2vec2_feature=x['audio'])
         generated.update({'kp_source': kp_source, 'kp_driving': kp_driving})
